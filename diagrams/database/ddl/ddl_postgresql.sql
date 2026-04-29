@@ -60,7 +60,6 @@ CREATE TABLE IF NOT EXISTS endpoint (
   CONSTRAINT chk_endpoint_port      CHECK (port BETWEEN 1 AND 65535)
 );
 
--- Trigger: updated_at automático
 CREATE OR REPLACE FUNCTION fn_set_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -81,7 +80,6 @@ END$$;
 
 -- -----------------------------------------------------
 -- Table: user
--- Nota: "user" é palavra reservada — aspas duplas obrigatórias
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS "user" (
   id_user   SERIAL          NOT NULL,
