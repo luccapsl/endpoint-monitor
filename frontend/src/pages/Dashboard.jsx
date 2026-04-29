@@ -40,11 +40,12 @@ export default function Dashboard() {
 
   const { connected } = useWebSocket(handleWsMessage);
 
+  const active = endpoints.filter((e) => e.is_active);
   const stats = {
     total: endpoints.length,
-    up: endpoints.filter((e) => e.last_status === 'up').length,
-    down: endpoints.filter((e) => e.last_status === 'down').length,
-    degraded: endpoints.filter((e) => e.last_status === 'degraded').length,
+    up: active.filter((e) => e.last_status === 'up').length,
+    down: active.filter((e) => e.last_status === 'down').length,
+    degraded: active.filter((e) => e.last_status === 'degraded').length,
   };
 
   const handleEndpointCreated = (ep) => setEndpoints((prev) => [...prev, ep]);

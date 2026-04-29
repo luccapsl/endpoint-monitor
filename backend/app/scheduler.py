@@ -73,6 +73,7 @@ async def run_check(endpoint_id: int) -> None:
         return
 
     session = database._SessionLocal()
+    result: CheckResultEvent | None = None
     try:
         endpoint = session.get(Endpoint, endpoint_id)
         if endpoint is None or not endpoint.is_active:
@@ -80,23 +81,25 @@ async def run_check(endpoint_id: int) -> None:
             return
 
         if endpoint.type == "http":
-            result: CheckResultEvent = await check_http(endpoint)
+            result = await check_http(endpoint)
         elif endpoint.type == "tcp":
             result = await check_tcp(endpoint)
         else:
             return
 
-        record = CheckResult(
+        session.add(CheckResult(
             id_endpoint=endpoint_id,
             checked_at=result.checked_at,
             status=result.status,
             latency_ms=result.latency_ms,
             status_code=result.status_code,
             error_message=result.error_message,
-        )
-        session.add(record)
+        ))
         session.commit()
+    except Exception:
+        session.rollback()
     finally:
         session.close()
 
-    await manager.broadcast(result.model_dump(mode="json"))
+    if result is not None:
+        await manager.broadcast(result.model_dump(mode="json"))

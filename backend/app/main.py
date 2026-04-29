@@ -14,14 +14,19 @@ from app import scheduler as sched
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    configured = config_exists()
-    if configured:
-        config = load_config()
-        init_engine(config)
-        init_db()
-        sched.init_scheduler(app)
+    import logging
+    initialized = False
+    if config_exists():
+        try:
+            config = load_config()
+            init_engine(config)
+            init_db()
+            sched.init_scheduler(app)
+            initialized = True
+        except Exception as exc:
+            logging.getLogger("app").error("DB init failed on startup: %s", exc)
     yield
-    if configured:
+    if initialized:
         sched.scheduler.shutdown(wait=False)
 
 

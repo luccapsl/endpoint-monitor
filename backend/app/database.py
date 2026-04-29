@@ -42,7 +42,27 @@ def init_engine(config: dict) -> None:
 
 def init_db() -> None:
     import app.models  # noqa: F401 — registers all models with Base
-    Base.metadata.create_all(_engine, checkfirst=True)
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(_engine)
+
+    # SQLAlchemy 2.x MySQL dialect requires a non-None, non-empty schema for
+    # has_table(). Using SELECT DATABASE() is more reliable than url.database,
+    # which can return an empty string depending on URL parsing edge cases.
+    if _engine.dialect.name == "mysql":
+        with _engine.connect() as conn:
+            schema = conn.execute(text("SELECT DATABASE()")).scalar()
+        if not schema:
+            raise ValueError(
+                "No database selected — the connection string has no database name. "
+                "Verify the 'Banco de Dados' field in the configuration."
+            )
+    else:
+        schema = None
+
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name, schema=schema):
+            table.create(_engine)
 
 
 def get_session() -> Generator:

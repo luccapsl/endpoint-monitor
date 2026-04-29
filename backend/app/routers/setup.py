@@ -38,18 +38,74 @@ def test_connection(config: ConnectionConfig):
 @router.post("/setup/save")
 def save_setup(config: ConnectionConfig):
     try:
-        conn_str = build_connection_string(config.model_dump())
+        data = config.model_dump()
+        create_db = not data["database"].strip()
+        data["database"] = data["database"].strip() or "endpoint_monitor"
+
+        if create_db:
+            _ensure_database(data)
+
+        conn_str = build_connection_string(data)
         engine = create_engine(conn_str, connect_args={"connect_timeout": 5})
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         engine.dispose()
 
-        save_config(config.model_dump())
-        init_engine(config.model_dump())
+        init_engine(data)
         init_db()
+        save_config(data)
         return {"success": True}
     except Exception as exc:
         return {"success": False, "error": _classify_error(str(exc))}
+
+
+def _ensure_database(config: dict) -> None:
+    db_name = config["database"]
+    engine_type = config["engine"]
+
+    if engine_type in ("mysql", "mariadb"):
+        bootstrap = {**config, "database": ""}
+        safe = db_name.replace("`", "``")
+        stmt = text(f"CREATE DATABASE IF NOT EXISTS `{safe}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+        engine = create_engine(build_connection_string(bootstrap), connect_args={"connect_timeout": 5})
+        try:
+            with engine.connect() as conn:
+                conn.execute(stmt)
+        finally:
+            engine.dispose()
+
+    elif engine_type == "postgresql":
+        bootstrap = {**config, "database": "postgres"}
+        safe = db_name.replace('"', '""')
+        stmt = text(f'CREATE DATABASE "{safe}"')
+        # CREATE DATABASE cannot run inside a transaction — requires AUTOCOMMIT
+        engine = create_engine(
+            build_connection_string(bootstrap),
+            connect_args={"connect_timeout": 5},
+            isolation_level="AUTOCOMMIT",
+        )
+        try:
+            with engine.connect() as conn:
+                exists = conn.execute(
+                    text("SELECT 1 FROM pg_database WHERE datname = :name"),
+                    {"name": db_name},
+                ).fetchone()
+                if not exists:
+                    conn.execute(stmt)
+        finally:
+            engine.dispose()
+
+    elif engine_type == "sqlserver":
+        bootstrap = {**config, "database": "master"}
+        safe = db_name.replace("]", "]]")
+        stmt = text(f"IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = N'{db_name.replace(chr(39), chr(39)*2)}') CREATE DATABASE [{safe}]")
+        engine = create_engine(build_connection_string(bootstrap), connect_args={"connect_timeout": 5})
+        try:
+            with engine.connect() as conn:
+                conn.execute(stmt)
+                conn.commit()
+        finally:
+            engine.dispose()
 
 
 def _classify_error(error: str) -> str:

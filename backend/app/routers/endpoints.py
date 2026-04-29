@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -82,7 +82,11 @@ def get_endpoint(endpoint_id: int, db: Session = Depends(get_session)):
 
 
 @router.post("/endpoints", response_model=EndpointResponse, status_code=status.HTTP_201_CREATED)
-async def create_endpoint(payload: EndpointCreate, db: Session = Depends(get_session)):
+async def create_endpoint(
+    payload: EndpointCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_session),
+):
     if not payload.name.strip():
         raise HTTPException(status_code=422, detail="name must not be blank")
     if not payload.hostname.strip():
@@ -94,21 +98,13 @@ async def create_endpoint(payload: EndpointCreate, db: Session = Depends(get_ses
     db.refresh(ep)
 
     sched.add_endpoint_job(ep)
+    background_tasks.add_task(sched.run_check, ep.id_endpoint)
 
-    # Run the first check immediately without waiting for the first interval
-    await sched.run_check(ep.id_endpoint)
-
-    last = (
-        db.query(CheckResult)
-        .filter(CheckResult.id_endpoint == ep.id_endpoint)
-        .order_by(CheckResult.checked_at.desc())
-        .first()
-    )
-    return _to_response(ep, last)
+    return _to_response(ep, None)
 
 
 @router.put("/endpoints/{endpoint_id}", response_model=EndpointResponse)
-def update_endpoint(
+async def update_endpoint(
     endpoint_id: int, payload: EndpointCreate, db: Session = Depends(get_session)
 ):
     ep = db.get(Endpoint, endpoint_id)
@@ -120,8 +116,8 @@ def update_endpoint(
     db.commit()
     db.refresh(ep)
 
-    # Reschedule with potentially new interval
     sched.add_endpoint_job(ep)
+    await sched.run_check(ep.id_endpoint)
 
     last = (
         db.query(CheckResult)
