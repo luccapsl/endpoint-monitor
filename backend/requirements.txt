@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+pymysql
+cryptography
+pyodbc
+pydantic
+pydantic-settings
+python-dotenv
+passlib[bcrypt]
+apscheduler>=3.10
+httpx
