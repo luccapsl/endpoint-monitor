@@ -1,8 +1,8 @@
 # Endpoint Monitor
 
-Real-time endpoint monitoring application.
+Real-time endpoint monitoring with latency charts, uptime metrics, and multi-protocol checks.
 
-**Stack:** Python · FastAPI · React · Vite · TailwindCSS · Docker
+**Stack:** Python · FastAPI · APScheduler · React · Vite · TailwindCSS · Recharts · Docker
 
 ---
 
@@ -49,7 +49,17 @@ The configuration is saved to `/app/data/config.json` inside a Docker volume —
 
 ---
 
-## Supported engines
+## Environment variables
+
+| Variable          | Default | Description                                                   |
+|-------------------|---------|---------------------------------------------------------------|
+| `RETENTION_HOURS` | `72`    | How long check results are kept. Older rows are purged hourly.|
+
+Set in `docker-compose.yml` or as a host env var before `docker compose up`.
+
+---
+
+## Supported engines (application database)
 
 | Engine      | Min. version | Default port |
 |-------------|-------------|-------------|
@@ -57,6 +67,19 @@ The configuration is saved to `/app/data/config.json` inside a Docker volume —
 | MySQL       | 8.0+        | 3306        |
 | MariaDB     | 10.6+       | 3306        |
 | SQL Server  | 2019+       | 1433        |
+
+---
+
+## Supported check types
+
+| Type       | Method                              | Status logic                             |
+|------------|-------------------------------------|------------------------------------------|
+| `http`     | HEAD → GET fallback via httpx       | up / degraded (> threshold ms) / down    |
+| `tcp`      | asyncio socket connect              | up / degraded (> threshold ms) / down    |
+| `database` | SQLAlchemy connect + SELECT 1       | up / degraded (> threshold ms) / down    |
+| `dns`      | socket.getaddrinfo in executor      | up / degraded (> threshold ms) / down    |
+
+All checkers honour the per-endpoint `timeout_s` setting and are async-safe.
 
 ---
 
@@ -74,16 +97,18 @@ endpoint-monitor/
 │       ├── main.py              # FastAPI entry point + lifespan
 │       ├── config.py            # config.json read/write
 │       ├── database.py          # SQLAlchemy engine + session
-│       ├── models.py            # User, Endpoint, CheckResult
+│       ├── models.py            # Endpoint, CheckResult
 │       ├── schemas.py           # Pydantic schemas
-│       ├── scheduler.py         # APScheduler check engine
+│       ├── scheduler.py         # APScheduler engine + retention purge
 │       ├── checkers/
-│       │   ├── http_checker.py  # HTTP/HTTPS checks via httpx
-│       │   └── tcp_checker.py   # TCP socket checks
+│       │   ├── http_checker.py  # HTTP/HTTPS via httpx
+│       │   ├── tcp_checker.py   # TCP socket connect
+│       │   ├── database_checker.py  # SQLAlchemy connect + SELECT 1
+│       │   └── dns_checker.py   # socket.getaddrinfo
 │       └── routers/
-│           ├── setup.py         # wizard endpoints
-│           ├── endpoints.py     # endpoint CRUD
-│           └── websocket.py     # WebSocket handler + ConnectionManager
+│           ├── setup.py         # wizard + /setup/info
+│           ├── endpoints.py     # CRUD + metrics + chart + history
+│           └── websocket.py     # WebSocket + ConnectionManager
 │
 └── frontend/
     ├── Dockerfile
@@ -93,65 +118,72 @@ endpoint-monitor/
         ├── App.jsx              # wizard ↔ dashboard routing
         ├── pages/
         │   ├── SetupWizard.jsx
-        │   └── Dashboard.jsx    # summary cards + endpoint list
+        │   └── Dashboard.jsx    # live state, drawer, WS events
         ├── components/
-        │   ├── EndpointCard.jsx # status card with live updates
-        │   ├── EndpointForm.jsx # create/edit modal
-        │   └── EndpointList.jsx # grid container
+        │   ├── EndpointCard.jsx    # status card with pulse + uptime
+        │   ├── EndpointForm.jsx    # create/edit modal (all types)
+        │   ├── EndpointList.jsx    # drag-and-drop grid
+        │   ├── EndpointDetail.jsx  # slide-in drawer with chart + history
+        │   ├── LatencyChart.jsx    # Recharts line chart with period selector
+        │   ├── UptimeBadge.jsx     # uptime % for a given period
+        │   └── CheckHistoryTable.jsx  # paginated history table
         ├── hooks/
         │   └── useWebSocket.js  # WS connection with auto-reconnect
-        └── services/
-            └── api.js           # all REST calls
+        ├── services/
+        │   └── api.js           # all REST calls
+        └── utils/
+            └── periods.js       # shared period list + filterPeriods()
 ```
 
 ---
 
 ## API
 
-| Method | Route                              | Description                                      |
-|--------|------------------------------------|--------------------------------------------------|
-| GET    | `/api/setup/status`                | Returns `{ configured: bool }`                   |
-| POST   | `/api/setup/test-connection`       | Tests the connection without saving              |
-| POST   | `/api/setup/save`                  | Saves config, creates tables, starts scheduler   |
-| GET    | `/api/endpoints`                   | List all endpoints with latest check result      |
-| GET    | `/api/endpoints/{id}`              | Get a single endpoint                            |
-| POST   | `/api/endpoints`                   | Create endpoint + run first check immediately    |
-| PUT    | `/api/endpoints/{id}`              | Update endpoint + reschedule job                 |
-| DELETE | `/api/endpoints/{id}`              | Delete endpoint + remove job                     |
-| PATCH  | `/api/endpoints/{id}/toggle`       | Toggle is_active, pause/resume scheduler job     |
-| WS     | `/ws/monitor`                      | Push check results in real time                  |
+| Method | Route                              | Description                                           |
+|--------|------------------------------------|-------------------------------------------------------|
+| GET    | `/api/setup/status`                | Returns `{ configured: bool }`                        |
+| POST   | `/api/setup/test-connection`       | Tests connection without saving                       |
+| POST   | `/api/setup/save`                  | Saves config, creates tables, starts scheduler        |
+| GET    | `/api/setup/info`                  | Returns `{ retention_hours }`                         |
+| GET    | `/api/endpoints`                   | List all endpoints with latest check result           |
+| GET    | `/api/endpoints/{id}`              | Get a single endpoint                                 |
+| POST   | `/api/endpoints`                   | Create endpoint + run first check immediately         |
+| PUT    | `/api/endpoints/{id}`              | Update endpoint + reschedule job                      |
+| DELETE | `/api/endpoints/{id}`              | Delete endpoint + remove job                          |
+| PATCH  | `/api/endpoints/{id}/toggle`       | Toggle is_active, pause/resume scheduler job          |
+| GET    | `/api/endpoints/{id}/metrics`      | Uptime %, avg/p95/p99 latency for a period            |
+| GET    | `/api/endpoints/{id}/chart`        | Time-bucketed latency series for the chart            |
+| GET    | `/api/endpoints/{id}/history`      | Paginated raw check results                           |
+| WS     | `/ws/monitor`                      | Push check results in real time                       |
+
+### Period values
+
+Used by `/metrics` and `/chart`: `1min` · `5min` · `10min` · `30min` · `1h` · `6h` · `24h` · `7d` · `30d`
+
+Periods longer than `RETENTION_HOURS` are automatically hidden in the UI.
 
 ---
 
 ## Data model
 
 ```
-user               endpoint              check_result
-────────────       ──────────────        ──────────────────
-id_user       PK   id_endpoint      PK   id_check_result  PK
-name               name                  id_endpoint      FK → endpoint
-password           hostname              checked_at
-role               type                  status
-is_active          is_active             latency_ms
-                   port                  status_code
-                   protocol              error_message
-                   check_interval_s
-                   timeout_s
-                   degraded_ms
-                   created_at
-                   updated_at
+endpoint                          check_result
+──────────────────────────        ──────────────────────
+id_endpoint          PK           id_check_result  PK
+name                              id_endpoint      FK → endpoint
+hostname                          checked_at
+type                              status
+is_active                         latency_ms
+port                              status_code
+protocol                          error_message
+check_interval_s
+timeout_s
+degraded_ms
+created_at
+updated_at
 ```
 
 Tables are created with `checkfirst=True` — idempotent, never recreates existing data.
-
----
-
-## Supported check types
-
-| Type  | Method                         | Status logic                                       |
-|-------|--------------------------------|----------------------------------------------------|
-| http  | HEAD → GET fallback via httpx  | up / degraded (if > threshold ms) / down           |
-| tcp   | asyncio socket connect         | up / degraded (if > threshold ms) / down           |
 
 ---
 
@@ -172,6 +204,11 @@ The backend broadcasts a JSON event over WebSocket after every check:
 
 The frontend `useWebSocket` hook reconnects automatically with exponential backoff (1 s → 2 s → 4 s … max 30 s).
 
+Live events are used to:
+- Update the status badge and latency on each card (with a brief pulse animation)
+- Append the new point to the latency chart (sliding-window trimmed per period)
+- Prepend the new row to the check history table
+
 ---
 
 ## Local development (without Docker)
@@ -180,7 +217,7 @@ The frontend `useWebSocket` hook reconnects automatically with exponential backo
 ```bash
 cd backend
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+RETENTION_HOURS=72 uvicorn app.main:app --reload
 # available at http://localhost:8000
 ```
 
@@ -190,19 +227,20 @@ cd frontend
 npm install
 npm run dev
 # available at http://localhost:5173
-# /api/* proxied to http://localhost:8000
+# /api/* and /ws/* proxied to http://localhost:8000
 ```
 
 > WebSocket (`/ws/monitor`) is proxied by Nginx in production (port 80).
-> For local dev without Docker, update `vite.config.js` to add a WS proxy.
+> For local dev without Docker, add a WS proxy entry to `vite.config.js`.
 
 ---
 
 ## Roadmap
 
-- [x] **Phase 1 — Foundation:** base structure, setup wizard, Docker
+- [x] **Phase 1 — Foundation:** base structure, setup wizard, Docker Compose
 - [x] **Phase 2 — MVP Core:** endpoint CRUD, HTTP/TCP checks, WebSocket live updates
-- [ ] Phase 3 — Dashboard: charts, uptime history, SLA metrics
-- [ ] Phase 4 — Alerts: email/webhook notifications
-- [ ] Phase 5 — Multi-user: JWT authentication
-- [ ] Phase 6 — User management: CRUD with admin/editor/readonly roles
+- [x] **Phase 3 — Visualization:** latency chart (Recharts), endpoint detail drawer, uptime badges, pulse animation
+- [x] **Phase 4 — Advanced types:** database checker (PG/MySQL/MariaDB/MSSQL), DNS checker, dynamic form
+- [x] **Phase 5 — History & metrics:** metrics API, uptime %, p95/p99 latency, check history table, data retention purge
+- [ ] Phase 6 — Alerts: email/webhook notifications on status change
+- [ ] Phase 7 — Multi-user: JWT authentication, admin/editor/readonly roles
