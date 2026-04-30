@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import EndpointCard from './EndpointCard';
 import EndpointForm from './EndpointForm';
 
@@ -9,7 +9,17 @@ function loadOrder() {
   catch { return []; }
 }
 
-export default function EndpointList({ endpoints, onEndpointCreated, onEndpointUpdated, onEndpointDeleted }) {
+export default function EndpointList({
+  endpoints,
+  onEndpointCreated,
+  onEndpointUpdated,
+  onEndpointDeleted,
+  onViewDetail,
+  // Optional: Dashboard can set triggerEdit to an endpoint object to open its
+  // edit form from outside (e.g. from the EndpointDetail drawer's Edit button).
+  triggerEdit,
+  onTriggerEditConsumed,
+}) {
   const [showForm, setShowForm] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [orderedIds, setOrderedIds] = useState(loadOrder);
@@ -27,6 +37,13 @@ export default function EndpointList({ endpoints, onEndpointCreated, onEndpointU
 
   const openCreate = () => { setEditTarget(null); setShowForm(true); };
   const openEdit = (ep) => { setEditTarget(ep); setShowForm(true); };
+
+  // Respond to external edit requests (e.g. from EndpointDetail's Edit button)
+  useEffect(() => {
+    if (!triggerEdit) return;
+    openEdit(triggerEdit);
+    onTriggerEditConsumed?.();
+  }, [triggerEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSaved = (saved) => {
     if (editTarget) { onEndpointUpdated(saved); }
@@ -95,6 +112,7 @@ export default function EndpointList({ endpoints, onEndpointCreated, onEndpointU
               onUpdate={onEndpointUpdated}
               onDelete={onEndpointDeleted}
               onEdit={openEdit}
+              onViewDetail={onViewDetail}
               isDragging={draggingId === ep.id_endpoint}
               isDragOver={overId === ep.id_endpoint}
               onDragStart={() => handleDragStart(ep.id_endpoint)}

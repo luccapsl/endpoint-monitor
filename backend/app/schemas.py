@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 class EndpointCreate(BaseModel):
     name: str
     hostname: str
-    type: Literal["http", "tcp"]
+    type: Literal["http", "tcp", "database", "dns"]
     port: int
     protocol: Optional[Literal["tcp", "udp", "http", "https", "icmp"]] = None
     check_interval_s: Optional[int] = 60
@@ -19,7 +19,7 @@ class EndpointCreate(BaseModel):
 class EndpointUpdate(BaseModel):
     name: Optional[str] = None
     hostname: Optional[str] = None
-    type: Optional[Literal["http", "tcp"]] = None
+    type: Optional[Literal["http", "tcp", "database", "dns"]] = None
     port: Optional[int] = None
     protocol: Optional[Literal["tcp", "udp", "http", "https", "icmp"]] = None
     check_interval_s: Optional[int] = None
@@ -55,3 +55,34 @@ class CheckResultEvent(BaseModel):
     latency_ms: Optional[int] = None
     status_code: Optional[int] = None
     error_message: Optional[str] = None
+
+
+class CheckResultItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_check_result: int
+    checked_at: datetime
+    status: str
+    latency_ms: Optional[int] = None
+    status_code: Optional[int] = None
+    error_message: Optional[str] = None
+
+
+class EndpointMetrics(BaseModel):
+    period: str
+    uptime_percent: float
+    total_checks: int
+    checks_up: int
+    checks_down: int
+    checks_degraded: int
+    avg_latency_ms: Optional[float] = None
+    p95_latency_ms: Optional[int] = None
+    p99_latency_ms: Optional[int] = None
+    min_latency_ms: Optional[int] = None
+    max_latency_ms: Optional[int] = None
+
+
+class ChartPoint(BaseModel):
+    timestamp: datetime
+    avg_latency_ms: Optional[float] = None
+    status: str

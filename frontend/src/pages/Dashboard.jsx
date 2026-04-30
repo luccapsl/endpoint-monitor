@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { getEndpoints } from '../services/api';
 import useWebSocket from '../hooks/useWebSocket';
 import EndpointList from '../components/EndpointList';
+import EndpointDetail from '../components/EndpointDetail';
 
 function StatCard({ label, value, color }) {
   return (
@@ -15,6 +16,14 @@ function StatCard({ label, value, color }) {
 export default function Dashboard() {
   const [endpoints, setEndpoints] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [latestEvent, setLatestEvent] = useState(null);
+
+  // Which endpoint the detail drawer is showing
+  const [detailEndpoint, setDetailEndpoint] = useState(null);
+
+  // When Edit is clicked inside EndpointDetail, close the drawer and tell
+  // EndpointList to open its edit form for that endpoint.
+  const [triggerEdit, setTriggerEdit] = useState(null);
 
   useEffect(() => {
     getEndpoints()
@@ -36,6 +45,7 @@ export default function Dashboard() {
           : ep
       )
     );
+    setLatestEvent(event);
   }, []);
 
   const { connected } = useWebSocket(handleWsMessage);
@@ -49,10 +59,27 @@ export default function Dashboard() {
   };
 
   const handleEndpointCreated = (ep) => setEndpoints((prev) => [...prev, ep]);
-  const handleEndpointUpdated = (ep) =>
+  const handleEndpointUpdated = (ep) => {
     setEndpoints((prev) => prev.map((e) => (e.id_endpoint === ep.id_endpoint ? ep : e)));
-  const handleEndpointDeleted = (id) =>
+    // Keep the detail drawer in sync after an edit
+    if (detailEndpoint?.id_endpoint === ep.id_endpoint) setDetailEndpoint(ep);
+  };
+  const handleEndpointDeleted = (id) => {
     setEndpoints((prev) => prev.filter((e) => e.id_endpoint !== id));
+    if (detailEndpoint?.id_endpoint === id) setDetailEndpoint(null);
+  };
+
+  // Always pass the freshest version of the endpoint to the drawer
+  const detailLive = detailEndpoint
+    ? (endpoints.find((e) => e.id_endpoint === detailEndpoint.id_endpoint) ?? detailEndpoint)
+    : null;
+
+  const handleViewDetail = (ep) => setDetailEndpoint(ep);
+  const handleCloseDetail = () => setDetailEndpoint(null);
+  const handleEditFromDetail = (ep) => {
+    setDetailEndpoint(null);
+    setTriggerEdit(ep);
+  };
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -85,9 +112,22 @@ export default function Dashboard() {
             onEndpointCreated={handleEndpointCreated}
             onEndpointUpdated={handleEndpointUpdated}
             onEndpointDeleted={handleEndpointDeleted}
+            onViewDetail={handleViewDetail}
+            triggerEdit={triggerEdit}
+            onTriggerEditConsumed={() => setTriggerEdit(null)}
           />
         )}
       </main>
+
+      {/* Detail drawer — overlays the dashboard without a route change */}
+      {detailLive && (
+        <EndpointDetail
+          endpoint={detailLive}
+          latestEvent={latestEvent}
+          onClose={handleCloseDetail}
+          onEdit={handleEditFromDetail}
+        />
+      )}
     </div>
   );
 }

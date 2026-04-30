@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
@@ -20,6 +22,11 @@ class ConnectionConfig(BaseModel):
 @router.get("/setup/status")
 def get_status():
     return {"configured": config_exists()}
+
+
+@router.get("/setup/info")
+def get_system_info():
+    return {"retention_hours": int(os.getenv("RETENTION_HOURS", "72"))}
 
 
 @router.post("/setup/test-connection")
@@ -54,6 +61,12 @@ def save_setup(config: ConnectionConfig):
         init_engine(data)
         init_db()
         save_config(data)
+
+        # Start the scheduler (idempotent) so periodic checks work immediately
+        # without requiring an app restart after the setup wizard.
+        from app import scheduler as sched
+        sched.start_scheduler_if_needed()
+
         return {"success": True}
     except Exception as exc:
         return {"success": False, "error": _classify_error(str(exc))}

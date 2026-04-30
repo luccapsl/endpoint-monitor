@@ -14,14 +14,20 @@ from app import scheduler as sched
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     import logging
+
+    # Capture the running event loop so the scheduler can be started later
+    # from sync route handlers (e.g. setup wizard) that run in a thread pool.
+    sched.set_app_event_loop(asyncio.get_running_loop())
+
     initialized = False
     if config_exists():
         try:
             config = load_config()
             init_engine(config)
             init_db()
-            sched.init_scheduler(app)
+            sched.init_scheduler(app)  # also starts retention job
             initialized = True
         except Exception as exc:
             logging.getLogger("app").error("DB init failed on startup: %s", exc)
