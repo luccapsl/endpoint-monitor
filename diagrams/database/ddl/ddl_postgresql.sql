@@ -84,7 +84,7 @@ END$$;
 CREATE TABLE IF NOT EXISTS "user" (
   id_user   SERIAL          NOT NULL,
   name      VARCHAR(255)    NOT NULL,
-  password  VARCHAR(255)    NOT NULL,  -- hash bcrypt/argon2id — nunca texto puro
+  password  VARCHAR(255)    NOT NULL,  
   role      user_role       NOT NULL DEFAULT 'readonly',
   is_active BOOLEAN         NOT NULL DEFAULT TRUE,
   CONSTRAINT pk_user      PRIMARY KEY (id_user),

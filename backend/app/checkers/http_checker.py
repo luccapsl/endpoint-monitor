@@ -22,7 +22,6 @@ async def check_http(endpoint) -> CheckResultEvent:
             start = time.monotonic()
             response = await client.head(url)
             if response.status_code == 405:
-                start = time.monotonic()
                 response = await client.get(url)
             elapsed_ms = int((time.monotonic() - start) * 1000)
 

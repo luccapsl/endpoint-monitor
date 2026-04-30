@@ -79,3 +79,35 @@ export async function toggleEndpoint(id) {
   if (!res.ok) throw new Error(`Failed to toggle endpoint: ${res.status}`);
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Metrics & History (Phases 3 & 5)
+// ---------------------------------------------------------------------------
+
+export async function getEndpointHistory(id, limit = 50, since = null) {
+  const params = new URLSearchParams({ limit });
+  if (since) params.set('since', since);
+  const res = await fetch(`${API_BASE}/endpoints/${id}/history?${params}`);
+  if (!res.ok) throw new Error(`Failed to fetch history: ${res.status}`);
+  return res.json();
+}
+
+export async function getEndpointMetrics(id, period = '24h') {
+  const res = await fetch(`${API_BASE}/endpoints/${id}/metrics?period=${period}`);
+  if (!res.ok) throw new Error(`Failed to fetch metrics: ${res.status}`);
+  return res.json();
+}
+
+export async function getEndpointChart(id, period = '1h', points = 60) {
+  const res = await fetch(
+    `${API_BASE}/endpoints/${id}/chart?period=${period}&points=${points}`
+  );
+  if (!res.ok) throw new Error(`Failed to fetch chart data: ${res.status}`);
+  return res.json();
+}
+
+export async function getSystemInfo() {
+  const res = await fetch(`${API_BASE}/setup/info`);
+  if (!res.ok) return { retention_hours: 72 };
+  return res.json();
+}
